@@ -1,0 +1,2 @@
+cd money_talk_front
+npx --no -- commitlint --edit "$1"

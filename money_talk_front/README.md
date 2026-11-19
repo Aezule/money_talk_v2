@@ -11,6 +11,13 @@ API_URL=http://localhost:8080 npm run dev
 
 Les types de l'API sont générés depuis l'OpenAPI : `npm run gen:api` (→ `src/api/schema.d.ts`).
 
+## Lint & commits
+
+- `npm run lint` / `npm run lint:fix` (ESLint + typescript-eslint + react-hooks)
+- Husky (installé par `npm install`) :
+  - `pre-commit` : lance `npm run lint`
+  - `commit-msg` : vérifie le format [Conventional Commits](https://www.conventionalcommits.org/) via commitlint, ex. `feat(front): ajout du formulaire`
+
 ## Tests
 
 | Commande | Contenu |
