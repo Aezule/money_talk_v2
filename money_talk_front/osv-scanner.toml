@@ -1,0 +1,11 @@
+# Exceptions du scan CVE (job « CVE » de la CI).
+# Chaque exception a une date d'expiration : à cette date le scan rebloque et il faut réévaluer.
+
+[[IgnoredVulns]]
+id = "GHSA-qxc2-j82w-r537"
+ignoreUntil = 2027-05-19T00:00:00Z
+reason = """
+@faker-js/faker@5.5.3, épinglé par postman-collection (dépendance dev de @stoplight/prism-cli, mock API).
+Faille dans faker.helpers.fake, jamais appelée par postman-collection.
+Pas de correctif amont : forcer faker >= 10.5 casse postman-collection au chargement (API v5 supprimée).
+"""
