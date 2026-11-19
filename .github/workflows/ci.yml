@@ -14,6 +14,28 @@ env:
   OSV_SCANNER_VERSION: 2.7.0
 
 jobs:
+  # ── Qualité : SonarCloud (check requis par le ruleset de main) ──────────────
+  sonarcloud:
+    name: SonarCloud
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Vérifier le token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::error::Secret SONAR_TOKEN absent : à créer dans Settings → Secrets and variables → Actions (token sonarcloud.io)."
+            exit 1
+          fi
+
+      - uses: SonarSource/sonarqube-scan-action@v8.4.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
   # ── 1a. CVE : dépendances npm (package-lock) + Go (go.mod) ──────────────────
   cve:
     name: CVE (osv-scanner)
