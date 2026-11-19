@@ -1,0 +1,219 @@
+openapi: 3.0.0
+info:
+  title: Coordination Front Back
+  version: 0.0.1
+# security:
+#   - bearerAuth: []
+paths:
+  /transactions:
+    get:
+      summary: Recupère toutes les transactions
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Transaction'
+              example:
+                - ID: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                  categoryId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+                  amount: 1200
+                  type: expense
+                  date: '2026-10-29T12:00:00.000Z'
+                  description: Courses
+                  isRecurring: false
+                - ID: 9b2d1c3e-4f5a-4b6c-8d7e-1f2a3b4c5d6e
+                  categoryId: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+                  amount: 250000
+                  type: income
+                  date: '2026-10-28T09:00:00.000Z'
+                  description: Salaire
+                  isRecurring: true
+                - ID: 5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9
+                  categoryId: 2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e
+                  amount: 85000
+                  type: expense
+                  date: '2026-10-27T08:00:00.000Z'
+                  description: Loyer
+                  isRecurring: true
+                - ID: c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f
+                  categoryId: 3c4d5e6f-7a8b-4c9d-0e1f-2a3b4c5d6e7f
+                  amount: 1599
+                  type: expense
+                  date: '2026-10-26T20:30:00.000Z'
+                  description: Netflix
+                  isRecurring: true
+                - ID: d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f7a
+                  categoryId: 4d5e6f7a-8b9c-4d0e-1f2a-3b4c5d6e7f8a
+                  amount: 4250
+                  type: expense
+                  date: '2026-10-25T13:15:00.000Z'
+                  description: Restaurant
+                  isRecurring: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      summary: Crée une transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionInput'
+      responses:
+        '201':
+          description: Créée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /transactions/recurring:
+    get:
+      summary: Recupère les transactions récurrentes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Transaction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /transactions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Recupère une transaction
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Met à jour une transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionInput'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Supprime une transaction
+      responses:
+        '200':
+          description: Supprimée
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    TransactionInput:
+      type: object
+      properties:
+        categoryId:
+          type: string
+          example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        amount:
+          type: number
+          example: 1200
+        type:
+          type: string
+          enum: [expense, income]
+          example: expense
+        date:
+          type: string
+          format: date-time
+          example: '2026-10-29T12:00:00.000Z'
+        description:
+          type: string
+          example: Courses
+        isRecurring:
+          type: boolean
+          example: false
+
+    Transaction:
+      allOf:
+        - type: object
+          properties:
+            ID:
+              type: string
+              example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        - $ref: '#/components/schemas/TransactionInput'
+
+    Error:
+      type: object
+      properties:
+        statusCode:
+          type: integer
+        message:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Body invalide
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 400
+            message: amount must be a number
+    Unauthorized:
+      description: Token absent ou invalide
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 401
+            message: Invalid token
+    NotFound:
+      description: Transaction introuvable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 404
+            message: Transaction not found
