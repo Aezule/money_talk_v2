@@ -32,8 +32,13 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Tests (unit + integration)
-        run: npm test
+      - name: Tests (unit + integration) + couverture
+        run: npm run test:coverage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-front
+          path: money_talk_front/coverage/lcov.info
 
       - name: Build
         run: npm run build
@@ -88,8 +93,36 @@ jobs:
               updatedAt: new Date()
             })'
 
-      - name: Tests
-        run: go test ./...
+      - name: Tests + couverture
+        run: go test -coverprofile=coverage.out ./...
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-api
+          path: money_talk_api_go/coverage.out
 
       - name: Build
         run: go build ./...
+
+  sonar:
+    name: SonarCloud
+    needs: [front, api]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-front
+          path: money_talk_front/coverage
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-api
+          path: money_talk_api_go
+
+      - uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

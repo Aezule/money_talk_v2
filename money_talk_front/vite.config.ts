@@ -15,5 +15,11 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/{unit,integration}/**/*.test.{ts,tsx}'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**'],
+      exclude: ['src/main.tsx', 'src/api/schema.d.ts'],
+      reporter: ['text', ['lcov', { projectRoot: '..' }]],
+    },
   },
 })
