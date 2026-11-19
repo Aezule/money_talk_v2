@@ -11,9 +11,57 @@ concurrency:
 
 env:
   GITLEAKS_VERSION: 8.30.1
+  OSV_SCANNER_VERSION: 2.7.0
 
 jobs:
-  # ── 1. Secrets : scan de tout le repo (historique git compris) ──────────────
+  # ── 1a. CVE : dépendances npm (package-lock) + Go (go.mod) ──────────────────
+  cve:
+    name: CVE (osv-scanner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Go est requis pour l'analyse d'appels (govulncheck) côté API
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: money_talk_api_go/go.mod
+          cache-dependency-path: money_talk_api_go/go.sum
+
+      - name: Install osv-scanner
+        run: |
+          curl -sSfL -o osv-scanner "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          chmod +x osv-scanner
+
+      # Rapport complet dans les logs (toutes sévérités), ne bloque jamais
+      - name: Scan (rapport)
+        run: ./osv-scanner scan source -r . || true
+
+      # Bloque uniquement sur High / Critical (CVSS >= 7.0)
+      # Exceptions justifiées : osv-scanner.toml dans le dossier concerné
+      - name: Bloquer sur High / Critical
+        run: |
+          set +e
+          ./osv-scanner scan source -r . --format json --output osv.json
+          code=$?
+          set -e
+          if [ "$code" -gt 1 ]; then
+            echo "osv-scanner a échoué (code $code)"
+            exit "$code"
+          fi
+          blocking=$(jq -r '
+            [ .results[]?.packages[]? as $p
+              | $p.groups[]?
+              | select((.max_severity // "") != "" and (.max_severity | tonumber) >= 7)
+              | "\($p.package.name)@\($p.package.version)  \(.ids | join(", "))  CVSS \(.max_severity)"
+            ] | unique | .[]' osv.json)
+          if [ -n "$blocking" ]; then
+            echo "::error::Vulnérabilités High/Critical détectées"
+            echo "$blocking"
+            exit 1
+          fi
+          echo "Aucune vulnérabilité High/Critical."
+
+  # ── 1b. Secrets : scan de tout le repo (historique git compris) ─────────────
   gitleaks:
     name: Gitleaks
     runs-on: ubuntu-latest
@@ -33,7 +81,7 @@ jobs:
   # ── 2a. Front : lint → test ─────────────────────────────────────────────────
   front-lint:
     name: Front · Lint
-    needs: gitleaks
+    needs: [gitleaks, cve]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -72,7 +120,7 @@ jobs:
   # ── 2b. API Go : lint → test ────────────────────────────────────────────────
   api-lint:
     name: API · Lint
-    needs: gitleaks
+    needs: [gitleaks, cve]
     runs-on: ubuntu-latest
     defaults:
       run:
