@@ -9,9 +9,88 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GITLEAKS_VERSION: 8.30.1
+  OSV_SCANNER_VERSION: 2.7.0
+
+# Actions épinglées par SHA (exigence Sonar), version en commentaire.
 jobs:
-  front:
-    name: Front (lint → test → build)
+  # ── 1a. CVE : dépendances npm (package-lock) + Go (go.mod) ──────────────────
+  cve:
+    name: CVE (osv-scanner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Go est requis pour l'analyse d'appels (govulncheck) côté API
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: money_talk_api_go/go.mod
+          cache-dependency-path: money_talk_api_go/go.sum
+
+      - name: Install osv-scanner (checksum vérifié)
+        run: |
+          base="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}"
+          curl --proto "=https" --tlsv1.2 -sSfLO "$base/osv-scanner_linux_amd64"
+          curl --proto "=https" --tlsv1.2 -sSfLO "$base/osv-scanner_SHA256SUMS"
+          grep ' osv-scanner_linux_amd64$' osv-scanner_SHA256SUMS | sha256sum -c -
+          mv osv-scanner_linux_amd64 osv-scanner
+          chmod +x osv-scanner
+
+      # Rapport complet dans les logs (toutes sévérités), ne bloque jamais
+      - name: Scan (rapport)
+        run: ./osv-scanner scan source -r . || true
+
+      # Bloque uniquement sur High / Critical (CVSS >= 7.0)
+      # Exceptions justifiées : osv-scanner.toml dans le dossier concerné
+      - name: Bloquer sur High / Critical
+        run: |
+          set +e
+          ./osv-scanner scan source -r . --format json --output osv.json
+          code=$?
+          set -e
+          if [ "$code" -gt 1 ]; then
+            echo "osv-scanner a échoué (code $code)"
+            exit "$code"
+          fi
+          blocking=$(jq -r '
+            [ .results[]?.packages[]? as $p
+              | $p.groups[]?
+              | select((.max_severity // "") != "" and (.max_severity | tonumber) >= 7)
+              | "\($p.package.name)@\($p.package.version)  \(.ids | join(", "))  CVSS \(.max_severity)"
+            ] | unique | .[]' osv.json)
+          if [ -n "$blocking" ]; then
+            echo "::error::Vulnérabilités High/Critical détectées"
+            echo "$blocking"
+            exit 1
+          fi
+          echo "Aucune vulnérabilité High/Critical."
+
+  # ── 1b. Secrets : scan de tout le repo (historique git compris) ─────────────
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks (checksum vérifié)
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --proto "=https" --tlsv1.2 -sSfLO "$base/$archive"
+          curl --proto "=https" --tlsv1.2 -sSfLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " $archive\$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "$archive" gitleaks
+
+      - name: Scan
+        run: ./gitleaks git . --redact --verbose
+
+  # ── 2a. Front : lint → test (+ couverture) ──────────────────────────────────
+  front-lint:
+    name: Front · Lint
+    needs: [gitleaks, cve]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -20,31 +99,65 @@ jobs:
       HUSKY: 0
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: money_talk_front/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
 
-      - run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
+  front-test:
+    name: Front · Test
+    needs: front-lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: money_talk_front
+    env:
+      HUSKY: 0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: money_talk_front/package-lock.json
+      - run: npm ci --ignore-scripts
       - name: Tests (unit + integration) + couverture
         run: npm run test:coverage
-
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-front
           path: money_talk_front/coverage/lcov.info
 
-      - name: Build
-        run: npm run build
+  # ── 2b. API Go : lint → test (+ couverture) ─────────────────────────────────
+  api-lint:
+    name: API · Lint
+    needs: [gitleaks, cve]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: money_talk_api_go
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: money_talk_api_go/go.mod
+          cache-dependency-path: money_talk_api_go/go.sum
+      - name: gofmt + go vet
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Fichiers non formatés (gofmt) :"
+            echo "$unformatted"
+            exit 1
+          fi
+          go vet ./...
 
-  api:
-    name: API Go (lint → test → build)
+  api-test:
+    name: API · Test
+    needs: api-lint
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -61,22 +174,10 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: money_talk_api_go/go.mod
           cache-dependency-path: money_talk_api_go/go.sum
-
-      - name: Lint (gofmt + go vet)
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "Fichiers non formatés (gofmt) :"
-            echo "$unformatted"
-            exit 1
-          fi
-          go vet ./...
-
       - name: Seed MongoDB
         run: |
           docker exec ${{ job.services.mongo.id }} mongosh moneytalks --quiet --eval '
@@ -92,37 +193,64 @@ jobs:
               createdAt: new Date(),
               updatedAt: new Date()
             })'
-
       - name: Tests + couverture
         run: go test -coverprofile=coverage.out ./...
-
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-api
           path: money_talk_api_go/coverage.out
 
-      - name: Build
-        run: go build ./...
-
+  # ── 3. Une fois tous les tests verts : SonarCloud + build des deux projets ──
   sonar:
     name: SonarCloud
-    needs: [front, api]
+    needs: [front-test, api-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          fetch-depth: 0 
-
+          fetch-depth: 0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: coverage-front
           path: money_talk_front/coverage
-
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: coverage-api
           path: money_talk_api_go
-
       - uses: SonarSource/sonarqube-scan-action@2f77a1ec69fb1d595b06f35ab27e97605bdef703 # v5.3.2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  front-build:
+    name: Front · Build
+    needs: [front-test, api-test]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: money_talk_front
+    env:
+      HUSKY: 0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: money_talk_front/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+
+  api-build:
+    name: API · Build
+    needs: [front-test, api-test]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: money_talk_api_go
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: money_talk_api_go/go.mod
+          cache-dependency-path: money_talk_api_go/go.sum
+      - run: go build ./...
