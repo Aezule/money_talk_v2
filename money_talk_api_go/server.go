@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+
 	"github.com/aezule/money_talk_Go/transactions"
 	"github.com/gin-gonic/gin"
 )
@@ -26,5 +28,9 @@ func main() {
 
 	r.GET("/transactions", transactions.GetTransactions)
 	r.GET("/transactions/:id", transactions.GetTransactionByID)
-	r.Run(":8080")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	r.Run(":" + port)
 }
