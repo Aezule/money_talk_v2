@@ -1,0 +1,39 @@
+# Render Blueprint : https://render.com/docs/blueprint-spec
+services:
+  # ── API Go (Gin) ───────────────────────────────────────────────────────────
+  - type: web
+    name: money-talk-api
+    runtime: go
+    rootDir: money_talk_api_go
+    plan: free
+    branch: main
+    autoDeployTrigger: checksPass 
+    buildCommand: go build -o app .
+    startCommand: ./app
+    envVars:
+      - key: GIN_MODE
+        value: release
+      - key: MONGODB_URI 
+        sync: false
+
+  # ── Front Vite / React (site statique) ─────────────────────────────────────
+  - type: web
+    name: money-talk-front
+    runtime: static
+    rootDir: money_talk_front
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    branch: main
+    autoDeployTrigger: checksPass 
+    envVars:
+      - key: HUSKY 
+        value: "0"
+    routes:
+      
+      - type: rewrite
+        source: /api/*
+        destination: https://money-talk-api.onrender.com/*
+ 
+      - type: rewrite
+        source: /*
+        destination: /index.html
